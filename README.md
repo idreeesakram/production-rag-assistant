@@ -20,7 +20,7 @@ Hybrid Retrieval • Cross-Encoder Reranking • Citation Enforcement • Automa
 
 ## Live Link⚡
 
-[Try the live app](https://appuction-rag-assistant-hlmgqebzhhynbgpbnnekqw.streamlit.app/)
+[Try the live app](https://ragresearchassistantidreesakram.streamlit.app/)
 
 Upload research paper PDFs and ask questions with grounded citations and page references.
 
@@ -463,10 +463,3 @@ Current implementation prioritizes retrieval quality and grounded answers over r
 
 ---
 
-# Author
-
-## Abdullah Al Arif
-
-JR. AI Engineer
-
-[GitHub](https://github.com/aieng-abdullah) • [LinkedIn](www.linkedin.com/in/abdullah-al-arif-8b58542a7)
