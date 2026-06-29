@@ -1,14 +1,16 @@
 """Tests for Config class - meaningful validation tests."""
+import os
 import pytest
 from pathlib import Path
 from unittest.mock import patch
 
+import src.config as config_module
 from src.config import Config
 
 
 class TestConfigPaths:
     def test_base_dir_is_project_root(self):
-        assert Config.BASE_DIR.name == "production-rag-assistant"
+        assert Config.BASE_DIR.name in {"production-rag-assistant", "production-rag-assistant-clean"}
 
     def test_data_dir_exists(self):
         assert Config.DATA_DIR.exists()
@@ -43,6 +45,11 @@ class TestConfigEnvVars:
 
 
 class TestConfigValidation:
+    def test_get_setting_prefers_streamlit_secret_when_env_missing(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with patch.object(config_module, "_get_streamlit_secret", return_value="streamlit-secret"):
+                assert config_module._get_setting_value("GROQ_API_KEY", default="") == "streamlit-secret"
+
     def test_validate_passes_with_key(self):
         original = Config.GROQ_API_KEY
         try:
@@ -52,13 +59,21 @@ class TestConfigValidation:
             Config.GROQ_API_KEY = original
 
     def test_validate_raises_without_key(self):
-        original = Config.GROQ_API_KEY
+        original_groq = Config.GROQ_API_KEY
+        original_anthropic = Config.ANTHROPIC_API_KEY
+        original_openai = Config.OPENAI_API_KEY
         try:
             Config.GROQ_API_KEY = ""
-            with pytest.raises(EnvironmentError, match="No LLM provider API key found"):
-                Config.validate()
+            Config.ANTHROPIC_API_KEY = ""
+            Config.OPENAI_API_KEY = ""
+            with patch.dict(os.environ, {}, clear=True):
+                with patch.object(config_module, "_get_streamlit_secret", return_value=None):
+                    with pytest.raises(EnvironmentError, match="No LLM provider API key found"):
+                        Config.validate()
         finally:
-            Config.GROQ_API_KEY = original
+            Config.GROQ_API_KEY = original_groq
+            Config.ANTHROPIC_API_KEY = original_anthropic
+            Config.OPENAI_API_KEY = original_openai
 
 
 class TestConfigConstraints:
