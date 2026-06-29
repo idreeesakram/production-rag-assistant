@@ -130,13 +130,6 @@ pytest tests/ -v
 
 ---
 
-# Performance Notes
-
-End-to-end latency ranges from 1.54s (p50) to 14.06s (p99) across 141 traced requests.
-
-The cross-encoder reranker accounts for 72% of total runtime on CPU with 12x variance between p50 and p95.
-
-Current implementation prioritizes retrieval quality and grounded answers over raw latency.
 
 ---
 
