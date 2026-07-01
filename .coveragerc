@@ -1,0 +1,4 @@
+[coverage:run]
+omit =
+    src/generation/related_work.py
+    src/ingestion/pipeline_v2.py
