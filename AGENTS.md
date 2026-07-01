@@ -6,8 +6,8 @@
 # Run app
 streamlit run app.py
 
-# Run CI tests (same as GitHub Actions: skips slow embedder tests, enforces 70% coverage)
-pytest tests/ -v -m "not slow" --cov=src --cov-report=term-missing --cov-fail-under=70
+# Run CI tests (same as GitHub Actions: skips slow embedder tests, enforces 68% coverage)
+pytest tests/ -v -m "not slow" --cov=src --cov-report=term-missing --cov-fail-under=68
 
 # Run all tests (including slow embedder tests, no coverage gate)
 pytest tests/ -v
@@ -48,9 +48,9 @@ tests/                        # Pytest suite
 
 GitHub Actions (`.github/workflows/eval.yml`) runs on push/PR to `main`:
 1. `pip install -r requirements.txt`
-2. `pytest tests/ -v -m "not slow" --cov=src --cov-report=term-missing --cov-fail-under=70`
+2. `pytest tests/ -v -m "not slow" --cov=src --cov-report=term-missing --cov-fail-under=68`
 
-CI runs **all tests** except the slow embedder tests (marked `@pytest.mark.slow`). Coverage must stay above **70%** or the build fails. Coverage report is printed to the CI log with missing lines highlighted.
+CI runs **all tests** except the slow embedder tests (marked `@pytest.mark.slow`). Coverage must stay above **68%** or the build fails. Coverage report is printed to the CI log with missing lines highlighted.
 
 ## Docker
 

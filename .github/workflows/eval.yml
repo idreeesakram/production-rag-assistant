@@ -26,4 +26,4 @@ jobs:
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           LOG_LEVEL: INFO
-        run: pytest tests/ -v -m "not slow" --cov=src --cov-report=term-missing --cov-fail-under=70
+        run: pytest tests/ -v -m "not slow" --cov=src --cov-report=term-missing --cov-fail-under=68

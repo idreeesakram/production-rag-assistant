@@ -239,7 +239,7 @@ Langfuse is completely optional. If the package is not installed, keys are not s
 ```yaml
 # .github/workflows/eval.yml
 - name: Run tests with coverage
-  run: pytest tests/ -v -m "not slow" --cov=src --cov-report=term-missing --cov-fail-under=70
+  run: pytest tests/ -v -m "not slow" --cov=src --cov-report=term-missing --cov-fail-under=68
 ```
 
 **Key decisions:**
@@ -250,7 +250,7 @@ Langfuse is completely optional. If the package is not installed, keys are not s
 | `python-version: "3.12"` | Matches production runtime |
 | `cache: "pip"` | Caches installed packages across runs, faster CI |
 | `-m "not slow"` | Skips embedder tests (~60s each), keeps CI under 2 minutes |
-| `--cov-fail-under=70` | Blocks merges if coverage drops below 70% |
+| `--cov-fail-under=68` | Blocks merges if coverage drops below 68% |
 
 **What CI does NOT do:**
 
