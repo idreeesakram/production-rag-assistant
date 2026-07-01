@@ -8,7 +8,7 @@ import streamlit as st
 from loguru import logger
 
 from src.config import Config
-from src.db.chroma_client import has_chunks, load_all_chunks, count_chunks
+from src.db.chroma_client import has_chunks, load_all_chunks, count_chunks, get_all_paper_titles
 from src.generation.related_work import generate_related_work
 from src.ingestion.pipeline_v2 import ingest_v2 as ingest
 from src.retrieval.bm25_index import build_bm25_index
@@ -27,9 +27,10 @@ def init_session_state():
     if "messages" not in st.session_state:
         st.session_state.messages = []
     if "bm25_index" not in st.session_state:
-        st.session_state.bm25_index = None
+        chunks = load_all_chunks()
+        st.session_state.bm25_index = build_bm25_index(chunks) if chunks else None
     if "ingested_docs" not in st.session_state:
-        st.session_state.ingested_docs = []
+        st.session_state.ingested_docs = get_all_paper_titles()
     if "anthropic_key" not in st.session_state:
         st.session_state.anthropic_key = ""
     if "anthropic_model" not in st.session_state:
