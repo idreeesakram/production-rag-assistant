@@ -1,36 +1,40 @@
 # Production RAG Assistant
 
-A Streamlit-based AI assistant for uploading research papers and asking questions grounded in the source documents. It uses retrieval-augmented generation to provide answers with citations and page references, making it useful for researchers, students, and anyone working with technical papers.
+A Streamlit-based retrieval-augmented generation assistant for PDF research papers. Upload papers, ask research questions, and receive answers grounded in the source documents.
 
 ## Features
 
 - Upload PDF research papers
-- Ask questions in natural language
-- Get answers grounded in the uploaded documents
-- View citations and source snippets
-- Use Groq, Anthropic, or OpenAI as the LLM provider
-- Run locally or deploy to Streamlit Cloud
+- Extract document chunks and build a BM25 index
+- Generate cited related work summaries using a language model
+- Support for Groq, Anthropic, and OpenAI providers
+- Optional provider override via the Streamlit sidebar
+- Local evaluation runner and test suite
 
 ## Quick Start
 
 1. Clone the repository
-2. Create and activate a virtual environment
-3. Install the dependencies
-4. Add your API key to a `.env` file or Streamlit secrets
+2. Create and activate a Python virtual environment
+3. Install dependencies
+4. Create a `.env` file with at least one LLM provider API key
 5. Run the app
 
 ```bash
 git clone https://github.com/idreeesakram/production-rag-assistant.git
 cd production-rag-assistant
 python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\\Scripts\\activate
+.venv\Scripts\activate      # Windows
+# source .venv/bin/activate  # macOS/Linux
 pip install -r requirements.txt
+
+# Create a .env file with one key, for example:
+# GROQ_API_KEY=your_groq_api_key
 streamlit run app.py
 ```
 
 ## Environment Variables
 
-Set at least one of the following:
+At least one of these must be set:
 
 - `GROQ_API_KEY`
 - `ANTHROPIC_API_KEY`
@@ -38,98 +42,48 @@ Set at least one of the following:
 
 Optional settings:
 
-- `GROQ_MODEL`
-- `ANTHROPIC_MODEL`
-- `OPENAI_MODEL`
+- `GROQ_MODEL` (default: `llama-3.3-70b-versatile`)
+- `ANTHROPIC_MODEL` (default: `claude-sonnet-4-20250514`)
+- `OPENAI_MODEL` (default: `gpt-4o`)
+- `CHROMA_HOST` (default: `localhost`)
+- `CHROMA_PORT` (default: `8000`)
+- `LANGFUSE_PUBLIC_KEY`
+- `LANGFUSE_SECRET_KEY`
+- `LANGFUSE_HOST` (default: `https://cloud.langfuse.com`)
+- `LOG_LEVEL` (default: `INFO`)
+
+Dependencies are installed from `requirements.txt`, including `streamlit` and `python-dotenv`.
+
+The app loads `.env` automatically via `python-dotenv`, and also supports Streamlit secrets in deployment.
 
 ## Project Structure
 
-- `app.py` — main Streamlit app
-- `src/config.py` — configuration and secret handling
-- `src/ingestion/` — PDF parsing and chunking
-- `src/retrieval/` — search and reranking logic
-- `src/generation/` — LLM answer generation
-
-## Deployment
-
-For Streamlit Cloud deployment, add your API key in the app secrets section using the same variable name as above.
-
-## License
-
-This project is for personal and educational use.
-
-
-| Layer | Technology |
-|---|---|
-| PDF Parsing | PyMuPDF |
-| Chunking | LangChain RecursiveCharacterTextSplitter |
-| Embeddings | sentence-transformers/all-MiniLM-L6-v2 |
-| Vector Database | ChromaDB |
-| Sparse Retrieval | BM25Retriever |
-| Reranker | cross-encoder/ms-marco-MiniLM-L-6-v2 |
-| LLM | Groq / Anthropic / OpenAI (with retry + failover) |
-| Orchestration | LangChain |
-| UI | Streamlit |
-| Observability | Langfuse |
-| Evaluation | Ragas |
-| CI/CD | GitHub Actions |
+- `app.py` — main Streamlit application
+- `src/config.py` — environment and provider config
+- `src/ingestion/` — PDF parsing and chunking pipeline
+- `src/retrieval/` — BM25 indexing and hybrid search
+- `src/generation/` — related work generation and answer assembly
+- `src/db/` — ChromaDB helper functions
+- `tests/` — pytest suite
+- `eval/` — evaluation runner
 
 ---
 
-# Local Setup
-
-<details>
-<summary><b>Setup Instructions</b></summary>
-
-<br>
+## Running Evaluation
 
 ```bash
-# Clone repository
-git clone https://github.com/aieng-abdullah/production-rag-assistant.git
-
-# Move into project
-cd production-rag-assistant
-
-# Create virtual environment
-python3 -m venv venv
-
-# Activate environment
-source venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Configure environment variables
-cp .env.example .env
-
-# Add GROQ_API_KEY inside .env
-
-# Start application
-streamlit run app.py
-```
-
-</details>
-
----
-
-# Running Evaluation
-
-```bash
-python3 eval/eval_runner.py
+python eval/eval_runner.py
 ```
 
 Evaluation results are saved to `results.json`.
 
 ---
 
-# Running Tests
+## Running Tests
 
 ```bash
 pytest tests/ -v
 ```
-
----
-
 
 ---
 
