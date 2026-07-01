@@ -2,7 +2,7 @@
 
 A production-grade Retrieval-Augmented Generation (RAG) system for academic researchers. Upload a library of PDF research papers, then generate grounded 2–3 paragraph Related Work summaries that cite papers by title — not by chunk index.
 
-**Live deployment:** https://ragresearchassistantidreesakram.streamlit.app/
+**Live deployment:** (https://production-rag-assistant-production.up.railway.app/)
 
 ## Features
 
