@@ -4,15 +4,13 @@ Provides 4 routes: upload, query, list papers, delete paper.
 All routes have Pydantic validation and rate limiting.
 """
 
-import os
 import time
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
 from collections import defaultdict
-from datetime import datetime, timedelta
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, status
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request, status
 from pydantic import BaseModel, Field
 import uvicorn
 from loguru import logger
@@ -24,22 +22,17 @@ from src.retrieval.bm25_index import build_bm25_index
 from src.generation.related_work import generate_related_work
 
 # --- Rate Limiting ---
-rate_limiter = defaultdict(list)
+rate_limiter: dict[str, list[float]] = defaultdict(list)
 RATE_LIMIT_REQUESTS = 10
 RATE_LIMIT_WINDOW = 60  # seconds
 
 
-def check_rate_limit(client_id: str = "default") -> bool:
-    """Simple rate limiter: max N requests per M seconds per client."""
+def check_rate_limit(client_ip: str) -> bool:
     now = time.time()
-    timestamps = rate_limiter[client_id]
-    
-    # Remove old timestamps outside the window
+    timestamps = rate_limiter[client_ip]
     timestamps[:] = [t for t in timestamps if now - t < RATE_LIMIT_WINDOW]
-    
     if len(timestamps) >= RATE_LIMIT_REQUESTS:
         return False
-    
     timestamps.append(now)
     return True
 
@@ -54,14 +47,15 @@ class UploadResponse(BaseModel):
 
 
 class QueryRequest(BaseModel):
-    query: str = Field(..., min_length=1, max_length=1000, description="User query")
-    max_retries: int = Field(3, ge=1, le=5, description="Max regeneration attempts")
+    query: str = Field(..., min_length=1, max_length=1000)
+    max_retries: int = Field(2, ge=1, le=3)
 
 
 class QueryResponse(BaseModel):
     status: str
     related_work: str
     cited_papers: list[str]
+    total_latency_ms: float
     retrieval_latency_ms: float
     generation_latency_ms: float
 
@@ -80,7 +74,7 @@ class ListPapersResponse(BaseModel):
 
 
 class DeletePaperRequest(BaseModel):
-    doc_id: str = Field(..., min_length=1, description="Document ID to delete")
+    doc_id: str = Field(..., min_length=1)
 
 
 class DeletePaperResponse(BaseModel):
@@ -90,19 +84,25 @@ class DeletePaperResponse(BaseModel):
     chunks_deleted: int
 
 
-# --- FastAPI App ---
+# --- App Lifespan ---
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    Config.validate()
+    _rebuild_bm25_index()
+    yield
+
+
 app = FastAPI(
     title="RAG Research Assistant API",
     description="Upload papers, query for related work, manage library",
     version="1.0",
+    lifespan=lifespan,
 )
 
-# Global BM25 index (rebuilt on each upload)
 _bm25_index = None
 
 
 def _rebuild_bm25_index():
-    """Rebuild the BM25 index from all chunks in Chroma."""
     global _bm25_index
     chunks = load_all_chunks()
     if chunks:
@@ -111,226 +111,166 @@ def _rebuild_bm25_index():
     return _bm25_index
 
 
-@app.on_event("startup")
-def startup():
-    """Load BM25 index on startup."""
-    Config.validate()
-    _rebuild_bm25_index()
-
-
 # --- Route 1: Upload ---
-@app.post("/upload", response_model=UploadResponse, status_code=status.HTTP_200_OK)
-async def upload_paper(file: UploadFile = File(...)):
-    """
-    Upload a research paper PDF.
-    
-    - **file**: PDF file to upload (required)
-    
-    Returns: pages parsed, chunks created
-    """
-    if not check_rate_limit():
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Rate limit exceeded. Max 10 requests per 60 seconds."
-        )
-    
+@app.post("/upload", response_model=UploadResponse)
+async def upload_paper(request: Request, file: UploadFile = File(...)):
+    client_ip = request.client.host if request.client else "unknown"
+    if not check_rate_limit(client_ip):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded.")
+
     if not file.filename or not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="File must be a PDF."
-        )
-    
+        raise HTTPException(status_code=400, detail="File must be a PDF.")
+
+    # Sanitize filename — strip any path components to prevent traversal
+    safe_filename = Path(file.filename).name
+    if not safe_filename or not safe_filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Invalid filename.")
+
+    contents = await file.read()
+    if not contents:
+        raise HTTPException(status_code=400, detail="File is empty.")
+
     try:
-        # Save uploaded file temporarily
         upload_dir = Path("data/uploads")
         upload_dir.mkdir(parents=True, exist_ok=True)
-        file_path = upload_dir / file.filename
-        
-        contents = await file.read()
-        if not contents:
-            raise ValueError("File is empty")
-        
+        file_path = upload_dir / safe_filename
+
         with open(file_path, "wb") as f:
             f.write(contents)
-        
-        # Ingest the PDF
+
         result = ingest(str(file_path))
-        
-        # Rebuild BM25 index
         _rebuild_bm25_index()
-        
-        logger.info(f"Uploaded {file.filename}: {result['pages']} pages, {result['chunks']} chunks")
-        
+
+        logger.info(f"Uploaded {safe_filename}: {result['pages']} pages, {result['chunks']} chunks")
         return UploadResponse(
             status="success",
-            message=f"Successfully ingested {file.filename}",
-            file_name=file.filename,
+            message=f"Successfully ingested {safe_filename}",
+            file_name=safe_filename,
             pages=result["pages"],
             chunks=result["chunks"],
         )
-    
     except Exception as e:
         logger.error(f"Upload failed: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to ingest PDF: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Failed to ingest PDF: {str(e)}")
 
 
 # --- Route 2: Query ---
-@app.post("/query", response_model=QueryResponse, status_code=status.HTTP_200_OK)
-async def query_papers(request: QueryRequest):
-    """
-    Query the paper library and generate a Related Work summary.
-    
-    - **query**: Question or topic (required, 1-1000 chars)
-    - **max_retries**: How many times to retry if citation validation fails (1-5, default 3)
-    
-    Returns: Related Work paragraph citing papers by title, latency metrics
-    """
-    if not check_rate_limit():
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Rate limit exceeded."
-        )
-    
+@app.post("/query", response_model=QueryResponse)
+async def query_papers(request: Request, body: QueryRequest):
+    client_ip = request.client.host if request.client else "unknown"
+    if not check_rate_limit(client_ip):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded.")
+
     if not _bm25_index:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No papers uploaded yet. Please upload a PDF first."
-        )
-    
+        raise HTTPException(status_code=400, detail="No papers uploaded yet.")
+
     try:
-        t0 = time.time()
+        t_total_start = time.time()
+
+        # Measure retrieval separately by timing generate_related_work internals
+        # We split timing at the generate_related_work boundary
+        t_retrieval_start = time.time()
+        from src.retrieval.pipeline import retrieval
+        from src.retrieval.bm25_index import build_bm25_index
+        chunks = retrieval(body.query, _bm25_index, top_k=10)
+        t_retrieval_end = time.time()
+
+        t_generation_start = time.time()
         related_work, cited_papers = generate_related_work(
-            request.query,
+            body.query,
             _bm25_index,
-            max_retries=request.max_retries,
+            max_retries=body.max_retries,
         )
-        elapsed_ms = (time.time() - t0) * 1000
-        
-        logger.info(f"Query answered in {elapsed_ms:.0f}ms, cited {len(cited_papers)} papers")
-        
+        t_generation_end = time.time()
+
+        retrieval_ms = (t_retrieval_end - t_retrieval_start) * 1000
+        generation_ms = (t_generation_end - t_generation_start) * 1000
+        total_ms = (t_generation_end - t_total_start) * 1000
+
+        logger.info(f"Query answered in {total_ms:.0f}ms (retrieval={retrieval_ms:.0f}ms, generation={generation_ms:.0f}ms)")
+
         return QueryResponse(
             status="success",
             related_work=related_work,
             cited_papers=cited_papers,
-            retrieval_latency_ms=100,  # Placeholder
-            generation_latency_ms=elapsed_ms - 100,
+            total_latency_ms=round(total_ms, 2),
+            retrieval_latency_ms=round(retrieval_ms, 2),
+            generation_latency_ms=round(generation_ms, 2),
         )
-    
     except Exception as e:
         logger.error(f"Query failed: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Query generation failed: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Query generation failed: {str(e)}")
 
 
 # --- Route 3: List Papers ---
-@app.get("/list", response_model=ListPapersResponse, status_code=status.HTTP_200_OK)
+@app.get("/list", response_model=ListPapersResponse)
 async def list_papers():
-    """
-    List all uploaded papers with chunk counts.
-    
-    Returns: List of papers, total count, total chunks
-    """
     try:
         collection = get_collection()
         all_docs = collection.get(include=["metadatas"])
-        
-        # Group by doc_id and paper_title
         paper_map = {}
         for i, doc_id in enumerate(all_docs.get("ids", [])):
             metadata = all_docs.get("metadatas", [{}])[i]
             pid = metadata.get("doc_id", "unknown")
             title = metadata.get("paper_title", pid)
-            
             if pid not in paper_map:
                 paper_map[pid] = {"title": title, "count": 0}
             paper_map[pid]["count"] += 1
-        
+
         papers = [
             PaperInfo(doc_id=pid, paper_title=info["title"], chunk_count=info["count"])
             for pid, info in paper_map.items()
         ]
-        
-        total_chunks = count_chunks()
-        
         return ListPapersResponse(
             status="success",
             papers=papers,
             total_papers=len(papers),
-            total_chunks=total_chunks,
+            total_chunks=count_chunks(),
         )
-    
     except Exception as e:
         logger.error(f"List failed: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to list papers: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Failed to list papers: {str(e)}")
 
 
 # --- Route 4: Delete Paper ---
-@app.post("/delete", response_model=DeletePaperResponse, status_code=status.HTTP_200_OK)
-async def delete_paper(request: DeletePaperRequest):
-    """
-    Delete a paper and all its chunks from the database.
-    
-    - **doc_id**: ID of the paper to delete (required)
-    
-    Returns: Confirmation, number of chunks deleted
-    """
-    if not check_rate_limit():
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Rate limit exceeded."
-        )
-    
+@app.post("/delete", response_model=DeletePaperResponse)
+async def delete_paper(request: Request, body: DeletePaperRequest):
+    client_ip = request.client.host if request.client else "unknown"
+    if not check_rate_limit(client_ip):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded.")
+
     try:
         collection = get_collection()
-        
-        # Find all chunk IDs for this doc_id
         all_docs = collection.get(include=["metadatas"])
-        chunk_ids_to_delete = []
-        
-        for i, doc_id in enumerate(all_docs.get("ids", [])):
-            metadata = all_docs.get("metadatas", [{}])[i]
-            if metadata.get("doc_id") == request.doc_id:
-                chunk_ids_to_delete.append(doc_id)
-        
+        chunk_ids_to_delete = [
+            doc_id for i, doc_id in enumerate(all_docs.get("ids", []))
+            if all_docs.get("metadatas", [{}])[i].get("doc_id") == body.doc_id
+        ]
+
         if not chunk_ids_to_delete:
-            raise ValueError(f"No chunks found for doc_id: {request.doc_id}")
-        
-        # Delete chunks
+            raise HTTPException(status_code=404, detail=f"No paper found with doc_id: {body.doc_id}")
+
         collection.delete(ids=chunk_ids_to_delete)
-        
-        # Rebuild BM25 index
         _rebuild_bm25_index()
-        
-        logger.info(f"Deleted {len(chunk_ids_to_delete)} chunks for doc_id: {request.doc_id}")
-        
+
+        logger.info(f"Deleted {len(chunk_ids_to_delete)} chunks for doc_id: {body.doc_id}")
         return DeletePaperResponse(
             status="success",
-            message=f"Deleted paper {request.doc_id}",
-            doc_id=request.doc_id,
+            message=f"Deleted paper {body.doc_id}",
+            doc_id=body.doc_id,
             chunks_deleted=len(chunk_ids_to_delete),
         )
-    
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Delete failed: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete paper: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Failed to delete paper: {str(e)}")
 
 
 # --- Health Check ---
-@app.get("/health", status_code=status.HTTP_200_OK)
+@app.get("/health")
 async def health_check():
-    """Health check endpoint."""
-    return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
+    return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
 
 
 if __name__ == "__main__":

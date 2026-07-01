@@ -1,6 +1,7 @@
 import json
 from typing import List, Dict, Any
-import os 
+import os
+
 os.environ["RAGAS_MAX_WORKERS"] = "1"
 
 from datasets import Dataset
@@ -19,7 +20,8 @@ from langchain_huggingface import HuggingFaceEmbeddings
 
 from src.db.chroma_client import load_all_chunks
 from src.retrieval.bm25_index import build_bm25_index
-from src.generation.chain import generate
+from src.retrieval.pipeline import retrieval
+from src.generation.related_work import generate_related_work
 from src.config import Config
 
 EVAL_DATASET_PATH = "data/eval_dataset.json"
@@ -33,16 +35,20 @@ THRESHOLDS = {
 }
 
 llm = LangchainLLMWrapper(ChatGroq(api_key=Config.GROQ_API_KEY, model=Config.GROQ_MODEL))
-embeddings = LangchainEmbeddingsWrapper(HuggingFaceEmbeddings(model_name=Config.EMBEDDING_MODEL,model_kwargs={"device": "cpu"}))
+embeddings = LangchainEmbeddingsWrapper(
+    HuggingFaceEmbeddings(model_name=Config.EMBEDDING_MODEL, model_kwargs={"device": "cpu"})
+)
 
 _bm25_index = None
 
-def _get_pipeline():
+
+def _get_bm25_index():
     global _bm25_index
     if _bm25_index is None:
         chunks = load_all_chunks()
         _bm25_index = build_bm25_index(chunks)
     return _bm25_index
+
 
 def load_eval_dataset(file_path: str) -> List[Dict[str, str]]:
     with open(file_path, "r", encoding="utf-8") as f:
@@ -50,13 +56,20 @@ def load_eval_dataset(file_path: str) -> List[Dict[str, str]]:
     logger.info(f"Loaded {len(data)} evaluation samples")
     return data
 
+
 def run_rag(question: str) -> Dict[str, Any]:
-    bm25_index = _get_pipeline()
-    cited_answer = generate(query=question, bm25_index=bm25_index)
+    """Run the shipped generate_related_work pipeline — same code path as production."""
+    bm25_index = _get_bm25_index()
+    chunks = retrieval(question, bm25_index, top_k=10)
+    related_work, cited_papers = generate_related_work(
+        query=question,
+        bm25_index=bm25_index,
+    )
     return {
-        "answer": cited_answer.answer,
-        "contexts": [source.text for source in cited_answer.sources],
+        "answer": related_work,
+        "contexts": [c.get("text", "") for c in chunks],
     }
+
 
 def build_eval_samples(eval_dataset: List[Dict[str, str]]) -> List[Dict[str, Any]]:
     samples = []
@@ -71,9 +84,9 @@ def build_eval_samples(eval_dataset: List[Dict[str, str]]) -> List[Dict[str, Any
         logger.info(f"Sample created: {item['question'][:50]}")
     return samples
 
+
 def run_ragas_evaluation(samples: List[Dict[str, Any]]) -> Dict[str, float]:
     dataset = Dataset.from_list(samples)
-
     result = evaluate(
         dataset=dataset,
         metrics=[
@@ -83,17 +96,9 @@ def run_ragas_evaluation(samples: List[Dict[str, Any]]) -> Dict[str, float]:
             ContextRecall(llm=llm),
         ],
     )
-
     df = result.to_pandas()
+    return df.select_dtypes(include=["number"]).mean().to_dict()
 
-    scores = (
-        df
-        .select_dtypes(include=["number"])
-        .mean()
-        .to_dict()
-    )
-
-    return scores
 
 def check_thresholds(scores: Dict[str, float]) -> Dict[str, Dict[str, Any]]:
     results = {}
@@ -106,13 +111,18 @@ def check_thresholds(scores: Dict[str, float]) -> Dict[str, Dict[str, Any]]:
         }
     return results
 
+
 def save_results(samples, scores, threshold_results, output_path):
     with open(output_path, "w", encoding="utf-8") as f:
-        json.dump({"metric_scores": scores, "threshold_results": threshold_results, "samples": samples}, f, indent=2)
+        json.dump(
+            {"metric_scores": scores, "threshold_results": threshold_results, "samples": samples},
+            f, indent=2
+        )
     logger.info(f"Results saved to {output_path}")
 
+
 def main():
-    logger.info("Starting RAG evaluation")
+    logger.info("Starting RAG evaluation — using shipped generate_related_work pipeline")
     eval_dataset = load_eval_dataset(EVAL_DATASET_PATH)
     samples = build_eval_samples(eval_dataset)
     scores = run_ragas_evaluation(samples)
@@ -123,7 +133,9 @@ def main():
     print("RAG Evaluation Results")
     print("==============================")
     for metric, result in threshold_results.items():
-        print(f"{metric}: {result['score']:.4f} (threshold={result['threshold']}) => {result['status']}")
+        status = result["status"]
+        print(f"{metric}: {result['score']:.4f} (threshold={result['threshold']}) => {status}")
+
 
 if __name__ == "__main__":
     main()
