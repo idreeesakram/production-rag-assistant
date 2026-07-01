@@ -19,7 +19,7 @@ COPY src/ ./src/
 COPY app.py .
 
 # Create data directories
-RUN mkdir -p data/chroma data/raw data/processed
+RUN mkdir -p /data/chroma /data/raw /data/processed
 
 # Expose Streamlit port
 EXPOSE 8501

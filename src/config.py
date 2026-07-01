@@ -36,8 +36,8 @@ def _get_setting_value(name: str, default: str = "") -> str:
 class Config:
     # --- Paths ---
     BASE_DIR = Path(__file__).parent.parent
-    DATA_DIR = BASE_DIR / "data"
-    CHROMA_DIR = DATA_DIR / "chroma"
+    DATA_DIR = Path(os.getenv("DATA_DIR", str(BASE_DIR / "data")))
+    CHROMA_DIR = Path(os.getenv("CHROMA_DIR", str(DATA_DIR / "chroma")))
 
     # --- ChromaDB ---
     CHROMA_HOST = os.getenv("CHROMA_HOST", "localhost")

@@ -13,7 +13,7 @@ from src.generation.related_work import generate_related_work
 from src.ingestion.pipeline_v2 import ingest_v2 as ingest
 from src.retrieval.bm25_index import build_bm25_index
 
-DATA_DIR = Path("data/raw")
+DATA_DIR = Path(os.getenv("DATA_DIR", "data")) / "raw"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 st.set_page_config(
