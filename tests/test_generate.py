@@ -41,9 +41,7 @@ class TestGenerateRelatedWork:
     def test_successful_generation(self, mock_retrieval, mock_llm):
         chunks = [{"paper_title": "Attention Is All You Need", "page_num": 1, "text": "transformer text", "doc_id": "d1"}]
         mock_retrieval.return_value = chunks
-        mock_llm.return_value = (
-            "A" * 100 + " [Attention Is All You Need] describes transformers in detail.",
-        )
+        mock_llm.return_value = "A" * 100 + " [Attention Is All You Need] describes transformers in detail."
 
         bm25 = MagicMock()
         with patch("src.generation.related_work.Config.validate"):
@@ -69,8 +67,8 @@ class TestGenerateRelatedWork:
 
         good_response = "A" * 100 + " [Real Paper] is discussed here."
         mock_llm.side_effect = [
-            ("no brackets here at all " * 10,),  # First attempt fails
-            (good_response,),                      # Second attempt succeeds
+            "no brackets here at all " * 10,
+            good_response,
         ]
 
         bm25 = MagicMock()
@@ -84,7 +82,7 @@ class TestGenerateRelatedWork:
     def test_raises_after_all_retries_fail(self, mock_retrieval, mock_llm):
         chunks = [{"paper_title": "Real Paper", "page_num": 1, "text": "text", "doc_id": "d1"}]
         mock_retrieval.return_value = chunks
-        mock_llm.return_value = ("no valid citations here " * 10,)
+        mock_llm.return_value = "no valid citations here " * 10
 
         bm25 = MagicMock()
         with patch("src.generation.related_work.Config.validate"):
