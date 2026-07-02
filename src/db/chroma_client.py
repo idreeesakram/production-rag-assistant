@@ -1,21 +1,17 @@
 """
 ChromaDB client using pure LangChain Chroma integration.
 """
-
 from typing import Optional, List, Dict
-
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from loguru import logger
 from src.config import Config
 from src.ingestion.embedder import _get_model as get_embedding_model
 
-# Lazy-loaded vectorstore instance
 _vectorstore: Optional[Chroma] = None
 
 
 def _get_vectorstore() -> Chroma:
-    """Get or initialize the LangChain Chroma vectorstore."""
     global _vectorstore
     if _vectorstore is None:
         embedding_model = get_embedding_model()
@@ -61,9 +57,11 @@ def load_all_chunks() -> List[Dict]:
     results = collection.get()
     chunks = []
     for text, metadata in zip(results["documents"], results["metadatas"]):
+        doc_id = metadata.get("doc_id", "unknown")
+        chunk_index = metadata.get("chunk_index", 0)
         chunks.append({
             "text": text,
-            "chunk_id": f"{metadata['doc_id']}_chunk_{metadata['chunk_index']}",
+            "chunk_id": f"{doc_id}_chunk_{chunk_index}",
             **metadata
         })
     return chunks
