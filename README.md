@@ -2,7 +2,7 @@
 
 A production-grade Retrieval-Augmented Generation (RAG) system for academic researchers. Upload a library of PDF research papers, then generate grounded 2–3 paragraph Related Work summaries that cite papers by title — not by chunk index.
 
-**Live deployment:** (https://production-rag-assistant-production.up.railway.app/)
+**Live deployment:** https://production-rag-assistant-production.up.railway.app/
 
 ## Features
 
@@ -11,7 +11,7 @@ A production-grade Retrieval-Augmented Generation (RAG) system for academic rese
 - Hybrid retrieval: BM25 + vector search fused with Reciprocal Rank Fusion (RRF)
 - Cross-encoder reranking (ms-marco-MiniLM-L-6-v2) over top 20 candidates
 - Generates 2–3 paragraph Related Work summaries citing papers by title
-- Citation validation with regeneration loop (up to 3 retries via Pydantic)
+- Citation validation with fuzzy matching and regeneration loop (up to 2 retries)
 - FastAPI backend with 4 routes: upload, query, list papers, delete paper
 - Multi-provider LLM support: Groq → Anthropic → OpenAI with failover
 - Langfuse observability tracing
@@ -33,7 +33,7 @@ streamlit run app.py
 To run the FastAPI backend alongside the UI:
 
 ```bash
-uvicorn src.api:app --reload --port 8001
+uvicorn api:app --reload --port 8001
 ```
 
 ## API Routes
@@ -42,10 +42,10 @@ uvicorn src.api:app --reload --port 8001
 |--------|-------|-------------|
 | POST | `/upload` | Upload a PDF and ingest into vector DB |
 | POST | `/query` | Generate a Related Work summary from the library |
-| GET | `/papers` | List all stored papers |
-| DELETE | `/papers/{paper_id}` | Delete a paper and all its chunks |
+| GET | `/list` | List all stored papers |
+| POST | `/delete` | Delete a paper and all its chunks |
 
-All routes use Pydantic validation — missing or invalid fields return HTTP 422.
+All routes use Pydantic validation — missing or invalid fields return HTTP 422. Rate limiting: 10 requests per 60 seconds per IP.
 
 ## Environment Variables
 
@@ -60,8 +60,8 @@ Optional settings:
 - `GROQ_MODEL` (default: `llama-3.3-70b-versatile`)
 - `ANTHROPIC_MODEL` (default: `claude-sonnet-4-20250514`)
 - `OPENAI_MODEL` (default: `gpt-4o`)
-- `CHROMA_HOST` (default: `localhost`)
-- `CHROMA_PORT` (default: `8000`)
+- `DATA_DIR` (default: `data`)
+- `CHROMA_DIR` (default: `data/chroma`)
 - `LANGFUSE_PUBLIC_KEY`
 - `LANGFUSE_SECRET_KEY`
 - `LANGFUSE_HOST` (default: `https://cloud.langfuse.com`)
@@ -70,15 +70,15 @@ Optional settings:
 ## Project Structure
 
 - `app.py` — Streamlit UI
-- `src/api.py` — FastAPI backend (4 routes)
+- `api.py` — FastAPI backend (4 routes: upload, query, list, delete)
 - `src/config.py` — environment and provider config
-- `src/pipeline_v2.py` — token-based ingestion pipeline (tiktoken)
-- `src/related_work.py` — Related Work generation with citation regeneration loop
+- `src/ingestion/pipeline_v2.py` — token-based ingestion pipeline (tiktoken, 512 tokens / 100 overlap)
+- `src/generation/related_work.py` — Related Work generation with fuzzy citation validation and regeneration loop
 - `src/ingestion/` — PDF parsing and chunking
-- `src/retrieval/` — BM25 indexing and hybrid search
-- `src/generation/` — answer assembly
+- `src/retrieval/` — BM25 indexing, hybrid search, RRF, cross-encoder reranking
+- `src/generation/` — LLM providers and answer assembly
 - `src/db/` — ChromaDB helpers
-- `tests/` — pytest suite (140 tests, 68% coverage)
+- `tests/` — pytest suite (136 tests, 81% coverage)
 - `eval/` — evaluation runner
 
 ## Evaluation
@@ -87,7 +87,7 @@ Optional settings:
 python eval/eval_runner.py
 ```
 
-Evaluated on 5 question-answer pairs using Ragas (Groq Llama 3.3 70B as judge):
+Evaluated on 5 question-answer pairs using Ragas (Groq Llama 3.3 70B as judge). Evaluation runs against the shipped `generate_related_work` pipeline — the same code path users hit in production.
 
 | Metric | Score | Threshold | Status |
 |--------|-------|-----------|--------|
@@ -103,10 +103,10 @@ Evaluation results are saved to `results.json`.
 
 End-to-end request tracing via Langfuse. 141 traces collected during development and testing.
 
-The cross-encoder reranker is the primary latency driver (~72% of total runtime). Groq LLM generation at p50 is 0.57s.
+The cross-encoder reranker is the primary latency driver (~72% of total runtime). Groq LLM generation at p50 is 0.57s. Component latency is measured per-request and returned in the `/query` response.
 
 ## Running Tests
 
 ```bash
-pytest tests/ -v
+python -m pytest tests/ -v
 ```
