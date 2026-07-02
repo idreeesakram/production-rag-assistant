@@ -19,6 +19,7 @@ from src.config import Config
 from src.ingestion.pipeline_v2 import ingest_v2 as ingest
 from src.db.chroma_client import get_collection, count_chunks, load_all_chunks
 from src.retrieval.bm25_index import build_bm25_index
+from src.retrieval.pipeline import retrieval
 from src.generation.related_work import generate_related_work
 
 # --- Rate Limiting ---
@@ -35,6 +36,18 @@ def check_rate_limit(client_ip: str) -> bool:
         return False
     timestamps.append(now)
     return True
+
+
+def _cleanup_old_uploads(upload_dir: Path, max_age_seconds: int = 3600):
+    """Delete uploaded PDFs older than max_age_seconds to prevent disk creep."""
+    now = time.time()
+    for f in upload_dir.glob("*.pdf"):
+        try:
+            if now - f.stat().st_mtime > max_age_seconds:
+                f.unlink()
+                logger.info(f"Cleaned up old upload: {f.name}")
+        except Exception as e:
+            logger.warning(f"Failed to clean up {f.name}: {e}")
 
 
 # --- Pydantic Models ---
@@ -121,7 +134,6 @@ async def upload_paper(request: Request, file: UploadFile = File(...)):
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="File must be a PDF.")
 
-    # Sanitize filename — strip any path components to prevent traversal
     safe_filename = Path(file.filename).name
     if not safe_filename or not safe_filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Invalid filename.")
@@ -133,8 +145,11 @@ async def upload_paper(request: Request, file: UploadFile = File(...)):
     try:
         upload_dir = Path("data/uploads")
         upload_dir.mkdir(parents=True, exist_ok=True)
-        file_path = upload_dir / safe_filename
 
+        # Clean up old uploads before writing new one
+        _cleanup_old_uploads(upload_dir)
+
+        file_path = upload_dir / safe_filename
         with open(file_path, "wb") as f:
             f.write(contents)
 
@@ -167,11 +182,7 @@ async def query_papers(request: Request, body: QueryRequest):
     try:
         t_total_start = time.time()
 
-        # Measure retrieval separately by timing generate_related_work internals
-        # We split timing at the generate_related_work boundary
         t_retrieval_start = time.time()
-        from src.retrieval.pipeline import retrieval
-        from src.retrieval.bm25_index import build_bm25_index
         chunks = retrieval(body.query, _bm25_index, top_k=10)
         t_retrieval_end = time.time()
 
