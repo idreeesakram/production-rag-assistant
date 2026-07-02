@@ -63,8 +63,8 @@ class Config:
     OPENAI_MODEL = _get_setting_value("OPENAI_MODEL", "gpt-4o")
 
     # --- Retrieval Params ---
-    CHUNK_SIZE = 350
-    CHUNK_OVERLAP = 75
+    CHUNK_SIZE = 512
+    CHUNK_OVERLAP = 100
     TOP_K_RERANK = 5
     RRF_K = 60
 
