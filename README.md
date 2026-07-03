@@ -14,7 +14,6 @@ A production-grade Retrieval-Augmented Generation (RAG) system for academic rese
 - Citation validation with fuzzy matching and regeneration loop (up to 2 retries)
 - FastAPI backend with 4 routes: upload, query, list papers, delete paper
 - Multi-provider LLM support: Groq → Anthropic → OpenAI with failover
-- Langfuse observability tracing
 - ChromaDB persisted to disk — data survives server restarts
 
 ## Quick Start
@@ -100,8 +99,6 @@ Faithfulness of 0.83 means 83% of generated claims are grounded in retrieved con
 Evaluation results are saved to `results.json`.
 
 ## Observability
-
-End-to-end request tracing via Langfuse. 141 traces collected during development and testing.
 
 The cross-encoder reranker is the primary latency driver (~72% of total runtime). Groq LLM generation at p50 is 0.57s. Component latency is measured per-request and returned in the `/query` response.
 
