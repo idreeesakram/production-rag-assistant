@@ -14,13 +14,6 @@ from src.retrieval.pipeline import retrieval
 from src.generation.providers import build_provider_chain, create_langchain_client
 from src.config import Config
 import logging
-from tenacity import (
-    retry,
-    retry_if_exception_type,
-    stop_after_attempt,
-    wait_exponential,
-    before_log,
-)
 
 
 class RelatedWorkResponse(BaseModel):
@@ -132,6 +125,7 @@ def generate_related_work(
     query: str,
     bm25_index,
     max_retries: int = 2,
+    chunks: list[dict] | None = None,
 ) -> tuple[str, list[str]]:
     """
     Generate a Related Work summary citing papers by title.
@@ -141,6 +135,8 @@ def generate_related_work(
         query: User query or topic
         bm25_index: BM25 index for retrieval
         max_retries: Number of retry attempts on validation failure (default 2)
+        chunks: Pre-retrieved chunks (optional). If provided, skips retrieval.
+                Pass these from the caller to avoid double retrieval.
 
     Returns:
         (related_work_text, list_of_cited_paper_titles)
@@ -151,7 +147,10 @@ def generate_related_work(
     Config.validate()
     t0 = monotonic()
 
-    chunks = retrieval(query, bm25_index, top_k=10)
+    # Only retrieve if chunks not passed in from caller
+    if chunks is None:
+        chunks = retrieval(query, bm25_index, top_k=10)
+
     if not chunks:
         raise ValueError("No relevant papers found for query")
 
