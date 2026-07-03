@@ -145,8 +145,6 @@ async def upload_paper(request: Request, file: UploadFile = File(...)):
     try:
         upload_dir = Path("data/uploads")
         upload_dir.mkdir(parents=True, exist_ok=True)
-
-        # Clean up old uploads before writing new one
         _cleanup_old_uploads(upload_dir)
 
         file_path = upload_dir / safe_filename
@@ -182,15 +180,17 @@ async def query_papers(request: Request, body: QueryRequest):
     try:
         t_total_start = time.time()
 
+        # Retrieve once — pass chunks into generation to avoid double retrieval
         t_retrieval_start = time.time()
         chunks = retrieval(body.query, _bm25_index, top_k=10)
         t_retrieval_end = time.time()
 
         t_generation_start = time.time()
         related_work, cited_papers = generate_related_work(
-            body.query,
-            _bm25_index,
+            query=body.query,
+            bm25_index=_bm25_index,
             max_retries=body.max_retries,
+            chunks=chunks,  # Pass pre-retrieved chunks — no second retrieval
         )
         t_generation_end = time.time()
 
